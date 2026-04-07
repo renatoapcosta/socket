@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Structured JSON logging for production (compatible with ELK, Grafana Loki, etc.) -->
+    <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeCallerData>false</includeCallerData>
+            <!-- Fields emitted by StructuredObservabilityAdapter via MDC -->
+            <includeMdcKeyName>mti</includeMdcKeyName>
+            <includeMdcKeyName>nsu</includeMdcKeyName>
+            <includeMdcKeyName>originCode</includeMdcKeyName>
+            <includeMdcKeyName>branchCode</includeMdcKeyName>
+            <includeMdcKeyName>responseCode</includeMdcKeyName>
+            <includeMdcKeyName>processingTimeMs</includeMdcKeyName>
+            <includeMdcKeyName>status</includeMdcKeyName>
+            <includeMdcKeyName>connectionId</includeMdcKeyName>
+            <includeMdcKeyName>remoteAddress</includeMdcKeyName>
+            <includeMdcKeyName>errorType</includeMdcKeyName>
+            <includeMdcKeyName>event</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <!-- Plain text for local development -->
+    <appender name="TEXT_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [conn=%X{connectionId:-?} mti=%X{mti:-?} nsu=%X{nsu:-?}] - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Switch between JSON (production) and text (dev) via SOCKER_LOG_FORMAT env var -->
+    <root level="INFO">
+        <appender-ref ref="${SOCKER_LOG_FORMAT:-TEXT_STDOUT}"/>
+    </root>
+
+    <!-- Reduce noise from connection management in production -->
+    <logger name="br.com.socker.adapter.out.connectionpool" level="WARN"/>
+
+    <!-- Enable full debug only when explicitly requested -->
+    <logger name="br.com.socker" level="${SOCKER_LOG_LEVEL:-INFO}"/>
+
+</configuration>
