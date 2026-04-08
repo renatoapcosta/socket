@@ -6,13 +6,18 @@ import br.com.socker.domain.model.IsoMessage;
 import br.com.socker.domain.model.MessageType;
 import br.com.socker.domain.model.ResponseCode;
 import br.com.socker.domain.model.TransactionResult;
+import br.com.socker.infrastructure.protocol.ResponseBuilder;
 
 /**
  * Use case: process an incoming 0420 reversal and produce a 0430 response.
  *
  * <p>Reversals are sent when the Concentrador did not receive a 0210 response.
- * The use case returns a 0430 confirming the reversal was accepted (00) or
- * noting the transaction was already undone (86).
+ * The use case returns a 0430 confirming the reversal was accepted (00).
+ *
+ * <p>The 0430 is assembled via {@link ResponseBuilder} using the 0430
+ * {@link br.com.socker.infrastructure.protocol.MessageSpec}. The spec echoes
+ * bits 3, 4, 7, 11, 32, 41, 42, 49, 90 from the incoming 0420 and sets bit 39
+ * as mandatory. No bits 12/13 appear in the 0430 per the GwCel spec.
  */
 public class ProcessReversalUseCaseImpl implements ProcessReversalUseCase {
 
@@ -20,19 +25,10 @@ public class ProcessReversalUseCaseImpl implements ProcessReversalUseCase {
     public TransactionResult process(IsoMessage request) {
         validate(request);
 
-        // Mirror mandatory fields; in production this would look up the original tx.
-        IsoMessage response = IsoMessage.builder(MessageType.REVERSAL_RESPONSE)
-                .field(3,  request.getRequiredField(3))   // processing code — mirror from original
-                .field(4,  request.getRequiredField(4))   // amount — mirror
-                .field(7,  request.getRequiredField(7))   // transmission datetime
-                .field(11, request.getRequiredField(11))  // NSU
-                .fieldIfPresent(32, request.getField(32)) // branch code
-                .field(39, ResponseCode.APPROVED.getCode()) // 00 = transaction undone
-                .field(41, request.getRequiredField(41))  // terminal
-                .field(42, request.getRequiredField(42))  // origin
-                .field(49, request.getRequiredField(49))  // currency
-                .fieldIfPresent(90, request.getField(90)) // original transaction data
-                .build();
+        IsoMessage response = ResponseBuilder.forResponse(MessageType.REVERSAL_RESPONSE)
+            .echoingRequest(request)
+            .field(39, ResponseCode.APPROVED.getCode())
+            .build();
 
         return TransactionResult.success(response);
     }
@@ -54,7 +50,8 @@ public class ProcessReversalUseCaseImpl implements ProcessReversalUseCase {
 
     private void requireField(IsoMessage message, int bit, String name) {
         if (!message.hasField(bit)) {
-            throw new InvalidMessageException("Missing required field: " + name + " (bit " + bit + ")", bit);
+            throw new InvalidMessageException(
+                "Missing required field: " + name + " (bit " + bit + ")", bit);
         }
     }
 }
