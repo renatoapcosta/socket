@@ -1,9 +1,9 @@
 package br.com.socker.adapter.in.rest;
 
 import br.com.socker.application.port.in.DispatchMessageUseCase;
+import br.com.socker.domain.exception.ConnectionQueueFullException;
 import br.com.socker.domain.exception.InvalidMessageException;
-import br.com.socker.domain.exception.SessionNotFoundException;
-import br.com.socker.domain.exception.SessionQueueFullException;
+import br.com.socker.domain.exception.NoActiveConnectionException;
 import br.com.socker.domain.model.IsoMessage;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
@@ -16,27 +16,20 @@ import org.slf4j.MDC;
  * <p>This class is a pure adapter: it translates HTTP concepts (path params,
  * body, status codes) into domain calls and back. Zero business logic lives here.
  *
+ * <p>The {@code sessionId} path parameter is preserved for API compatibility and
+ * used only for logging — GwCel maintains a single active Concentrador connection
+ * regardless of the session identifier provided by the caller.
+ *
  * <h2>HTTP semantics</h2>
  * <table border="1">
  * <tr><th>Status</th><th>Meaning</th></tr>
  * <tr><td>202</td><td>Message accepted and enqueued for delivery</td></tr>
  * <tr><td>400</td><td>JSON malformed, MTI absent/unknown, or required bit missing</td></tr>
- * <tr><td>404</td><td>No active session found for the given sessionId</td></tr>
- * <tr><td>429</td><td>Session outbound queue is full — apply back-pressure</td></tr>
+ * <tr><td>404</td><td>No active Concentrador connection (Concentrador must connect first)</td></tr>
+ * <tr><td>429</td><td>Outbound queue is full — apply back-pressure</td></tr>
  * </table>
  *
  * <p>No response body is written in any case, per the specification.
- *
- * <h2>Logging</h2>
- * <p>MDC keys set during request processing:
- * <ul>
- *   <li>{@code sessionId}</li>
- *   <li>{@code mti}</li>
- *   <li>{@code nsu} (bit 11)</li>
- *   <li>{@code bit_003} (processing code)</li>
- *   <li>{@code bit_127} (NSU Filial, when present)</li>
- *   <li>{@code requestId} (from header {@code X-Request-Id}, when present)</li>
- * </ul>
  */
 public class MessageController {
 
@@ -63,7 +56,7 @@ public class MessageController {
     // ─── Handler ─────────────────────────────────────────────────────────────
 
     void handlePost(Context ctx) {
-        String sessionId = ctx.pathParam("sessionId");
+        String sessionId = ctx.pathParam("sessionId"); // preserved for logging / API compatibility
         String requestId = ctx.header(HEADER_REQUEST_ID);
 
         MDC.put("sessionId", sessionId);
@@ -118,7 +111,7 @@ public class MessageController {
 
     private void dispatchMessage(Context ctx, String sessionId, IsoMessage message) {
         try {
-            useCase.dispatch(sessionId, message);
+            useCase.dispatch(message);
             ctx.status(202);
             log.info("Accepted: MTI={} NSU={} sessionId={}",
                 message.getMessageType().getMti(),
@@ -127,11 +120,11 @@ public class MessageController {
         } catch (InvalidMessageException e) {
             log.warn("Payload rejected — use-case validation: {}", e.getMessage());
             ctx.status(400);
-        } catch (SessionNotFoundException e) {
-            log.warn("Session not found: {}", e.getMessage());
+        } catch (NoActiveConnectionException e) {
+            log.warn("No active Concentrador connection: {}", e.getMessage());
             ctx.status(404);
-        } catch (SessionQueueFullException e) {
-            log.warn("Back-pressure: session queue full: {}", e.getMessage());
+        } catch (ConnectionQueueFullException e) {
+            log.warn("Back-pressure: connection queue full: {}", e.getMessage());
             ctx.status(429);
         }
     }

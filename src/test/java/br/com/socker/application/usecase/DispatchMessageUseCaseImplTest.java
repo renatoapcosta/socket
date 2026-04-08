@@ -1,9 +1,9 @@
 package br.com.socker.application.usecase;
 
-import br.com.socker.application.port.out.SessionGateway;
+import br.com.socker.application.port.out.ConcentratorGateway;
+import br.com.socker.domain.exception.ConnectionQueueFullException;
 import br.com.socker.domain.exception.InvalidMessageException;
-import br.com.socker.domain.exception.SessionNotFoundException;
-import br.com.socker.domain.exception.SessionQueueFullException;
+import br.com.socker.domain.exception.NoActiveConnectionException;
 import br.com.socker.domain.model.IsoMessage;
 import br.com.socker.domain.model.MessageType;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,27 +17,24 @@ import static org.assertj.core.api.Assertions.*;
 /**
  * Unit tests for {@link DispatchMessageUseCaseImpl}.
  *
- * <p>Uses a hand-written stub for {@link SessionGateway} — avoids Mockito's
+ * <p>Uses a hand-written stub for {@link ConcentratorGateway} — avoids Mockito's
  * bytecode instrumentation limitations on Java 25 with {@code --enable-preview}.
  */
 class DispatchMessageUseCaseImplTest {
 
-    /** Stub that records every enqueue call and can be configured to throw. */
-    static class GatewayStub implements SessionGateway {
+    /** Stub that records every send call and can be configured to throw. */
+    static class GatewayStub implements ConcentratorGateway {
         final List<IsoMessage> received = new ArrayList<>();
-        final List<String> sessionIds   = new ArrayList<>();
-        RuntimeException throwOnEnqueue = null;
+        RuntimeException throwOnSend = null;
 
         @Override
-        public void enqueue(String sessionId, IsoMessage message) {
-            if (throwOnEnqueue != null) throw throwOnEnqueue;
-            sessionIds.add(sessionId);
+        public void send(IsoMessage message) {
+            if (throwOnSend != null) throw throwOnSend;
             received.add(message);
         }
 
-        boolean wasEnqueued() { return !received.isEmpty(); }
+        boolean wasSent() { return !received.isEmpty(); }
         IsoMessage lastMessage() { return received.get(received.size() - 1); }
-        String lastSessionId() { return sessionIds.get(sessionIds.size() - 1); }
     }
 
     private GatewayStub gateway;
@@ -52,20 +49,13 @@ class DispatchMessageUseCaseImplTest {
     // ─── Happy path ───────────────────────────────────────────────────────────
 
     @Test
-    void dispatch_validProbe_enqueuesMessage() {
+    void dispatch_validProbe_sendsMessage() {
         IsoMessage probe = valid0600();
 
-        useCase.dispatch("session-1", probe);
+        useCase.dispatch(probe);
 
-        assertThat(gateway.wasEnqueued()).isTrue();
+        assertThat(gateway.wasSent()).isTrue();
         assertThat(gateway.lastMessage()).isSameAs(probe);
-    }
-
-    @Test
-    void dispatch_passesCorrectSessionId() {
-        useCase.dispatch("my-session-abc", valid0600());
-
-        assertThat(gateway.lastSessionId()).isEqualTo("my-session-abc");
     }
 
     // ─── MTI validation ───────────────────────────────────────────────────────
@@ -75,11 +65,11 @@ class DispatchMessageUseCaseImplTest {
         IsoMessage wrong = IsoMessage.builder(MessageType.TRANSACTION_REQUEST)
             .field(3, "100000").build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", wrong))
+        assertThatThrownBy(() -> useCase.dispatch(wrong))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("not supported");
 
-        assertThat(gateway.wasEnqueued()).isFalse();
+        assertThat(gateway.wasSent()).isFalse();
     }
 
     @Test
@@ -87,10 +77,10 @@ class DispatchMessageUseCaseImplTest {
         IsoMessage wrong = IsoMessage.builder(MessageType.REVERSAL_REQUEST)
             .field(3, "100000").build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", wrong))
+        assertThatThrownBy(() -> useCase.dispatch(wrong))
             .isInstanceOf(InvalidMessageException.class);
 
-        assertThat(gateway.wasEnqueued()).isFalse();
+        assertThat(gateway.wasSent()).isFalse();
     }
 
     // ─── Required field validation ────────────────────────────────────────────
@@ -104,11 +94,11 @@ class DispatchMessageUseCaseImplTest {
             .field(125, "000132256").field(127, "000248756")
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_003");
 
-        assertThat(gateway.wasEnqueued()).isFalse();
+        assertThat(gateway.wasSent()).isFalse();
     }
 
     @Test
@@ -120,7 +110,7 @@ class DispatchMessageUseCaseImplTest {
             .field(42, "644400000000001").field(125, "000132256").field(127, "000248756")
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_007");
     }
@@ -134,7 +124,7 @@ class DispatchMessageUseCaseImplTest {
             .field(42, "644400000000001").field(125, "000132256").field(127, "000248756")
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_011");
     }
@@ -148,7 +138,7 @@ class DispatchMessageUseCaseImplTest {
             .field(125, "000132256").field(127, "000248756")
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_042");
     }
@@ -162,7 +152,7 @@ class DispatchMessageUseCaseImplTest {
             .field(127, "000248756")
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_125");
     }
@@ -176,7 +166,7 @@ class DispatchMessageUseCaseImplTest {
             // bit 127 missing
             .build();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", msg))
+        assertThatThrownBy(() -> useCase.dispatch(msg))
             .isInstanceOf(InvalidMessageException.class)
             .hasMessageContaining("bit_127");
     }
@@ -191,32 +181,32 @@ class DispatchMessageUseCaseImplTest {
             .field(42,  "644400000000001").field(125, "000132256").field(127, "000248756")
             .build();
 
-        assertThatCode(() -> useCase.dispatch("s1", msg)).doesNotThrowAnyException();
-        assertThat(gateway.wasEnqueued()).isTrue();
+        assertThatCode(() -> useCase.dispatch(msg)).doesNotThrowAnyException();
+        assertThat(gateway.wasSent()).isTrue();
     }
 
     @Test
     void dispatch_accepts_optional_bits_present() {
-        useCase.dispatch("s1", valid0600()); // includes bit 32 and 41
-        assertThat(gateway.wasEnqueued()).isTrue();
+        useCase.dispatch(valid0600()); // includes bit 32 and 41
+        assertThat(gateway.wasSent()).isTrue();
     }
 
     // ─── Gateway exceptions propagate ────────────────────────────────────────
 
     @Test
-    void dispatch_propagates_sessionNotFound() {
-        gateway.throwOnEnqueue = new SessionNotFoundException("s1");
+    void dispatch_propagates_noActiveConnection() {
+        gateway.throwOnSend = new NoActiveConnectionException();
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", valid0600()))
-            .isInstanceOf(SessionNotFoundException.class);
+        assertThatThrownBy(() -> useCase.dispatch(valid0600()))
+            .isInstanceOf(NoActiveConnectionException.class);
     }
 
     @Test
     void dispatch_propagates_queueFull() {
-        gateway.throwOnEnqueue = new SessionQueueFullException("s1");
+        gateway.throwOnSend = new ConnectionQueueFullException("conn-1");
 
-        assertThatThrownBy(() -> useCase.dispatch("s1", valid0600()))
-            .isInstanceOf(SessionQueueFullException.class);
+        assertThatThrownBy(() -> useCase.dispatch(valid0600()))
+            .isInstanceOf(ConnectionQueueFullException.class);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

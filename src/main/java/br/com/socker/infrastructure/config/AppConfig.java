@@ -42,6 +42,10 @@ public class AppConfig {
     }
 
     /** Maximum payload size the server will accept. */
+    public int sessionQueueCapacity() {
+        return intProp("session.queue.capacity", 500);
+    }
+
     public int serverMaxPayloadBytes() {
         return intProp("server.max.payload.bytes", 8_192);
     }

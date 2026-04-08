@@ -1,7 +1,7 @@
 package br.com.socker.application.usecase;
 
 import br.com.socker.application.port.in.DispatchMessageUseCase;
-import br.com.socker.application.port.out.SessionGateway;
+import br.com.socker.application.port.out.ConcentratorGateway;
 import br.com.socker.domain.exception.InvalidMessageException;
 import br.com.socker.domain.model.IsoMessage;
 import br.com.socker.domain.model.MessageType;
@@ -9,7 +9,8 @@ import br.com.socker.domain.model.MessageType;
 import java.util.Set;
 
 /**
- * Use case: validate and dispatch an ISO 8583 message for fire-and-forget transmission.
+ * Use case: validate and dispatch an ISO 8583 message for fire-and-forget transmission
+ * to the active Concentrador connection.
  *
  * <h2>V1 scope</h2>
  * <p>Only MTI {@code 0600} (Probe Request) is supported. The set of supported MTIs
@@ -23,8 +24,8 @@ import java.util.Set;
  *
  * <p>Field format validation (size, numeric range) is performed downstream by
  * {@link br.com.socker.infrastructure.protocol.IsoMessageEncoder} at encoding time.
- * Encoding failures are logged by the session worker and do not propagate back to
- * the REST caller — the REST contract is fire-and-forget.
+ * Encoding failures are logged by the connection writer thread and do not propagate
+ * back to the REST caller — the REST contract is fire-and-forget.
  */
 public class DispatchMessageUseCaseImpl implements DispatchMessageUseCase {
 
@@ -32,7 +33,7 @@ public class DispatchMessageUseCaseImpl implements DispatchMessageUseCase {
      * MTIs accepted by this use case.
      *
      * <p>V1: only 0600. Extend this set to support additional fire-and-forget messages
-     * (e.g. future administrative MTIs) without changing the validation flow.
+     * without changing the validation flow.
      */
     private static final Set<MessageType> SUPPORTED_MTIS = Set.of(
         MessageType.PROBE_REQUEST   // 0600
@@ -55,17 +56,17 @@ public class DispatchMessageUseCaseImpl implements DispatchMessageUseCase {
         127  // NSU Filial (9 digits)
     );
 
-    private final SessionGateway sessionGateway;
+    private final ConcentratorGateway gateway;
 
-    public DispatchMessageUseCaseImpl(SessionGateway sessionGateway) {
-        this.sessionGateway = sessionGateway;
+    public DispatchMessageUseCaseImpl(ConcentratorGateway gateway) {
+        this.gateway = gateway;
     }
 
     @Override
-    public void dispatch(String sessionId, IsoMessage message) {
+    public void dispatch(IsoMessage message) {
         validateMti(message);
         validateRequiredFields(message);
-        sessionGateway.enqueue(sessionId, message);
+        gateway.send(message);
     }
 
     private void validateMti(IsoMessage message) {

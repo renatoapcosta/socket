@@ -6,19 +6,21 @@ import br.com.socker.application.port.out.ObservabilityPort;
 import br.com.socker.application.usecase.ProcessReversalUseCaseImpl;
 import br.com.socker.application.usecase.ProcessTransactionUseCaseImpl;
 import br.com.socker.application.usecase.QueryParametersUseCaseImpl;
+import br.com.socker.infrastructure.concentrator.ConcentratorConnectionRegistry;
 import br.com.socker.infrastructure.config.AppConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Entry point for the Socket Server.
+ * Entry point for the Socket Server (without the REST subsystem).
  *
  * <p>Wires all dependencies manually (no IoC framework needed for this scope).
  * This is the composition root — every object is instantiated here and injected
  * into the components that need them.
  *
- * <p>To start: {@code java -jar socker.jar}
- * To run only the client: use {@link ClientBootstrap}.
+ * <p>For a combined REST + socket bootstrap, use {@link GwCelBootstrap}.
+ *
+ * <p>To start: {@code java -cp socker.jar br.com.socker.bootstrap.ServerBootstrap}
  */
 public class ServerBootstrap {
 
@@ -37,6 +39,9 @@ public class ServerBootstrap {
         ProcessReversalUseCaseImpl    processReversal    = new ProcessReversalUseCaseImpl();
         QueryParametersUseCaseImpl    queryParameters    = new QueryParametersUseCaseImpl();
 
+        // Registry — shared between socket server (writes) and any co-located REST layer (reads)
+        ConcentratorConnectionRegistry registry = new ConcentratorConnectionRegistry();
+
         // Server adapter
         SocketServerAdapter server = new SocketServerAdapter(
             config.serverPort(),
@@ -46,7 +51,9 @@ public class ServerBootstrap {
             processTransaction,
             processReversal,
             queryParameters,
-            observability
+            observability,
+            registry,
+            config.sessionQueueCapacity()
         );
 
         // Shutdown hook for graceful stop

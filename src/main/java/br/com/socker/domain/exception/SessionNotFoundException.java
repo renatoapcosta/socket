@@ -1,22 +1,14 @@
 package br.com.socker.domain.exception;
 
 /**
- * Thrown when an operation targets a session that does not exist
- * or has already been closed.
+ * @deprecated Replaced by {@link NoActiveConnectionException}.
  *
- * <p>This is a domain exception because the concept of a "session" is part of
- * the protocol domain — it represents a named, long-lived TCP connection to GwCel.
+ * <p>This exception referred to a named session (wrong direction abstraction).
+ * Use {@code NoActiveConnectionException} when no Concentrador has connected yet.
  */
+@Deprecated(since = "2.0", forRemoval = true)
 public class SessionNotFoundException extends DomainException {
-
-    private final String sessionId;
-
     public SessionNotFoundException(String sessionId) {
         super("Session not found or no longer active: " + sessionId);
-        this.sessionId = sessionId;
-    }
-
-    public String getSessionId() {
-        return sessionId;
     }
 }

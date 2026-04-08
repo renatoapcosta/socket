@@ -1,10 +1,9 @@
 package br.com.socker.adapter.in.rest;
 
-import br.com.socker.application.port.in.DispatchMessageUseCase;
-import br.com.socker.application.port.out.SessionGateway;
+import br.com.socker.application.port.out.ConcentratorGateway;
 import br.com.socker.application.usecase.DispatchMessageUseCaseImpl;
-import br.com.socker.domain.exception.SessionNotFoundException;
-import br.com.socker.domain.exception.SessionQueueFullException;
+import br.com.socker.domain.exception.ConnectionQueueFullException;
+import br.com.socker.domain.exception.NoActiveConnectionException;
 import br.com.socker.domain.model.IsoMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,10 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Integration test: real Javalin server on a random port + hand-written stub
- * {@link SessionGateway}.
+ * {@link ConcentratorGateway}.
  *
  * <p>Exercises the full adapter stack (HTTP → DTO → use case → port) without
- * requiring a live TCP socket to GwCel.
+ * requiring a live TCP socket to the Concentrador.
  *
  * <p>Manual stub is used instead of Mockito to avoid bytecode-manipulation
  * limitations on Java 25 with {@code --enable-preview}.
@@ -31,16 +30,14 @@ class MessageDispatchIntegrationTest {
 
     // ─── Stub ─────────────────────────────────────────────────────────────────
 
-    static class StubGateway implements SessionGateway {
-        String lastSessionId;
+    static class StubGateway implements ConcentratorGateway {
         IsoMessage lastMessage;
         RuntimeException toThrow;
 
         @Override
-        public void enqueue(String sessionId, IsoMessage message) {
+        public void send(IsoMessage message) {
             if (toThrow != null) throw toThrow;
-            this.lastSessionId = sessionId;
-            this.lastMessage   = message;
+            this.lastMessage = message;
         }
 
         boolean received() { return lastMessage != null; }
@@ -56,8 +53,8 @@ class MessageDispatchIntegrationTest {
     @BeforeEach
     void startServer() {
         gateway = new StubGateway();
-        DispatchMessageUseCase useCase = new DispatchMessageUseCaseImpl(gateway);
-        MessageController controller   = new MessageController(useCase);
+        DispatchMessageUseCaseImpl useCase = new DispatchMessageUseCaseImpl(gateway);
+        MessageController controller       = new MessageController(useCase);
         server   = new RestServerAdapter(0, controller); // 0 = OS-assigned port
         http     = HttpClient.newHttpClient();
         baseUrl  = "http://localhost:" + server.getPort();
@@ -82,13 +79,6 @@ class MessageDispatchIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(202);
         assertThat(response.body()).isNullOrEmpty();
-    }
-
-    @Test
-    void post_sessionId_isPassedToGateway() throws Exception {
-        post("/comunicacao/sessions/my-special-session/messages", validProbeJson());
-
-        assertThat(gateway.lastSessionId).isEqualTo("my-special-session");
     }
 
     @Test
@@ -216,8 +206,8 @@ class MessageDispatchIntegrationTest {
     // ─── 404 Not Found ────────────────────────────────────────────────────────
 
     @Test
-    void post_sessionNotFound_returns404() throws Exception {
-        gateway.toThrow = new SessionNotFoundException("s1");
+    void post_noActiveConnection_returns404() throws Exception {
+        gateway.toThrow = new NoActiveConnectionException();
 
         assertThat(post("/comunicacao/sessions/s1/messages", validProbeJson()).statusCode())
             .isEqualTo(404);
@@ -227,7 +217,7 @@ class MessageDispatchIntegrationTest {
 
     @Test
     void post_queueFull_returns429() throws Exception {
-        gateway.toThrow = new SessionQueueFullException("s1");
+        gateway.toThrow = new ConnectionQueueFullException("conn-1");
 
         assertThat(post("/comunicacao/sessions/s1/messages", validProbeJson()).statusCode())
             .isEqualTo(429);
